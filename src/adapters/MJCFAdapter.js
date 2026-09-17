@@ -1037,30 +1037,26 @@ export class MJCFAdapter {
             case 'cylinder':
             case 'capsule':
                 // Handle fromto attribute for capsule/cylinder
-                const fromto = geomEl.getAttribute('fromto');
+                const fromtoValues = this.parseFromto(geomEl.getAttribute('fromto'));
                 const radiusAttr = geomEl.getAttribute('size');
                 
-                if (fromto) {
-                    const ft = fromto.split(' ').map(parseFloat);
-                    if (ft.length >= 6) {
-                        const frame = this.computeFromtoFrame(
-                            [ft[0], ft[1], ft[2]],
-                            [ft[3], ft[4], ft[5]]
-                        );
+                if (fromtoValues) {
+                    const p1 = fromtoValues.slice(0, 3);
+                    const p2 = fromtoValues.slice(3, 6);
+                    const frame = this.computeFromtoFrame(p1, p2);
 
-                        // Store fromto data
-                        geometry.fromto = {
-                            p1: [ft[0], ft[1], ft[2]],
-                            p2: [ft[3], ft[4], ft[5]],
-                            center: frame.center,
-                            height: frame.height,
-                            quaternion: frame.quaternion
-                        };
-                        
-                        // Parse radius - for fromto, size is just radius
-                        const radiusVal = parseFloat(radiusAttr || '0.01');
-                        geometry.size = { radius: radiusVal, height: frame.height };
-                    }
+                    // Store fromto data
+                    geometry.fromto = {
+                        p1: p1,
+                        p2: p2,
+                        center: frame.center,
+                        height: frame.height,
+                        quaternion: frame.quaternion
+                    };
+
+                    // Parse radius - for fromto, size is just radius
+                    const radiusVal = parseFloat(radiusAttr || '0.01');
+                    geometry.size = { radius: radiusVal, height: frame.height };
                 } else if (radiusAttr) {
                     const radii = radiusAttr.split(' ').map(parseFloat);
                     // MJCF cylinder/capsule size is [radius, half-height], height needs to be multiplied by 2
@@ -1105,6 +1101,23 @@ export class MJCFAdapter {
     }
 
     /**
+     * Parse an MJCF `fromto` attribute ("x1 y1 z1 x2 y2 z2") into numbers.
+     * Runs of whitespace - including newlines in hand formatted files - are
+     * collapsed, and malformed values are rejected instead of turning into NaN.
+     *
+     * @param {string|null} value - Raw attribute value
+     * @returns {number[]|null} Six finite numbers, or null when unusable
+     */
+    static parseFromto(value) {
+        if (!value || typeof value !== 'string') return null;
+
+        const values = value.trim().split(/\s+/).map(Number);
+        if (values.length < 6 || !values.every(Number.isFinite)) return null;
+
+        return values.slice(0, 6);
+    }
+
+    /**
      * Compute the placement of a cylinder/capsule geom defined by an MJCF
      * `fromto` attribute.
      *
@@ -1121,17 +1134,20 @@ export class MJCFAdapter {
     static computeFromtoFrame(p1, p2) {
         const start = new THREE.Vector3().fromArray(p1);
         const end = new THREE.Vector3().fromArray(p2);
-        const direction = new THREE.Vector3().subVectors(end, start).normalize();
-        const quaternion = new THREE.Quaternion().setFromUnitVectors(
-            new THREE.Vector3(0, 0, 1), // geometry long axis after rotateX(PI/2)
-            direction
-        );
+        const height = start.distanceTo(end);
         const center = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+
+        // A zero length fromto has no direction to align with; keep the geom at
+        // its default orientation instead of relying on a degenerate normalize.
+        const quaternion = new THREE.Quaternion();
+        if (height > 1e-9) {
+            const direction = new THREE.Vector3().subVectors(end, start).divideScalar(height);
+            quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
+        }
 
         return {
             center: center.toArray(),
-            height: start.distanceTo(end),
-            // consecutive fromto geoms may be anti-parallel, keep the raw value
+            height: height,
             quaternion: quaternion.toArray()
         };
     }

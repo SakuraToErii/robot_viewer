@@ -87,3 +87,44 @@ test('anti-parallel fromto still points along the fromto direction', () => {
         .applyQuaternion(new THREE.Quaternion().fromArray(frame.quaternion));
     assert.ok(axis.distanceTo(new THREE.Vector3(0, 0, -1)) < EPS);
 });
+
+test('fromto attribute parsing tolerates runs of whitespace', () => {
+    assert.deepEqual(
+        MJCFAdapter.parseFromto('0.01 0 0 0.01 0 -0.15'),
+        [0.01, 0, 0, 0.01, 0, -0.15]
+    );
+
+    // hand formatted / pretty printed attributes
+    assert.deepEqual(
+        MJCFAdapter.parseFromto('\n  -0.054\t0  -0.025\n  0.132   0 -0.025  '),
+        [-0.054, 0, -0.025, 0.132, 0, -0.025]
+    );
+
+    // extra values are ignored, six are required
+    assert.deepEqual(
+        MJCFAdapter.parseFromto('1e-3 0 0 0 0 .2 0.5'),
+        [0.001, 0, 0, 0, 0, 0.2]
+    );
+});
+
+test('malformed fromto attributes are rejected instead of yielding NaN', () => {
+    assert.equal(MJCFAdapter.parseFromto(null), null);
+    assert.equal(MJCFAdapter.parseFromto(''), null);
+    assert.equal(MJCFAdapter.parseFromto('0 0 0'), null, 'too few values');
+    assert.equal(MJCFAdapter.parseFromto('0 0 0 0 0'), null, 'too few values');
+    assert.equal(MJCFAdapter.parseFromto('0 0 0 0 0 x'), null, 'not a number');
+    assert.equal(MJCFAdapter.parseFromto('0 0 0 0 0 0.2abc'), null, 'trailing garbage');
+});
+
+test('zero length fromto produces a valid identity transform', () => {
+    const frame = MJCFAdapter.computeFromtoFrame([0.1, 0.2, 0.3], [0.1, 0.2, 0.3]);
+
+    assert.equal(frame.height, 0);
+    assert.deepEqual(frame.center, [0.1, 0.2, 0.3]);
+    assert.ok(frame.quaternion.every(Number.isFinite), `quaternion: ${frame.quaternion}`);
+    assert.deepEqual(frame.quaternion, [0, 0, 0, 1], 'identity quaternion');
+
+    const axis = new THREE.Vector3(0, 0, 1)
+        .applyQuaternion(new THREE.Quaternion().fromArray(frame.quaternion));
+    assert.ok(axis.distanceTo(new THREE.Vector3(0, 0, 1)) < EPS);
+});
